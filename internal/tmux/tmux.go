@@ -176,6 +176,27 @@ func (t *Tmux) SendKeysDelayedDebounced(session, keys string, preDelayMs, deboun
 	return t.SendKeysDebounced(session, keys, debounceMs)
 }
 
+// NudgeSession sends a message to a Claude Code session reliably.
+// This is the canonical way to send messages to Claude sessions.
+// Uses: literal mode + 500ms debounce + separate Enter.
+// Verification is the Witness's job (AI), not this function.
+func (t *Tmux) NudgeSession(session, message string) error {
+	// 1. Send text in literal mode (handles special characters)
+	if _, err := t.run("send-keys", "-t", session, "-l", message); err != nil {
+		return err
+	}
+
+	// 2. Wait 500ms for paste to complete (tested, required)
+	time.Sleep(500 * time.Millisecond)
+
+	// 3. Send Enter as separate command (key to reliability)
+	if _, err := t.run("send-keys", "-t", session, "Enter"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // GetPaneCommand returns the current command running in a pane.
 // Returns "bash", "zsh", "claude", "node", etc.
 func (t *Tmux) GetPaneCommand(session string) (string, error) {

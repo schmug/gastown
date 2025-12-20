@@ -338,11 +338,11 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		style.Bold.Render("✓"),
 		style.Dim.Render(fmt.Sprintf("gt session at %s/%s", rigName, polecatName)))
 
-	// Send direct nudge to start working - don't rely on hooks or witness coordination
+	// Send direct nudge to start working using reliable NudgeSession
 	// The polecat has a work assignment in its inbox; just tell it to check
 	sessionName := sessMgr.SessionName(polecatName)
 	nudgeMsg := fmt.Sprintf("You have a work assignment. Run 'gt mail inbox' to see it, then start working on issue %s.", assignmentID)
-	if err := t.SendKeysDebounced(sessionName, nudgeMsg, 500); err != nil {
+	if err := t.NudgeSession(sessionName, nudgeMsg); err != nil {
 		fmt.Printf("  %s\n", style.Dim.Render(fmt.Sprintf("Warning: could not nudge polecat: %v", err)))
 	} else {
 		fmt.Printf("  %s\n", style.Dim.Render("Polecat nudged to start working"))
