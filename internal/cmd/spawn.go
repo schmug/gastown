@@ -242,6 +242,9 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s beads sync: %v\n", style.Dim.Render("Warning:"), err)
 	}
 
+	// Track molecule context for work assignment mail
+	var moleculeCtx *MoleculeContext
+
 	// Handle molecule instantiation if specified
 	if spawnMolecule != "" {
 		b := beads.New(beadsPath)
@@ -281,15 +284,25 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 
 		// Find the first ready step (one with no dependencies)
 		var firstReadyStep *beads.Issue
-		for _, step := range steps {
+		var stepNumber int
+		for i, step := range steps {
 			if len(step.DependsOn) == 0 {
 				firstReadyStep = step
+				stepNumber = i + 1
 				break
 			}
 		}
 
 		if firstReadyStep == nil {
 			return fmt.Errorf("no ready step found in molecule (all steps have dependencies)")
+		}
+
+		// Build molecule context for work assignment
+		moleculeCtx = &MoleculeContext{
+			MoleculeID:  spawnMolecule,
+			RootIssueID: spawnIssue, // Original issue is the molecule root
+			TotalSteps:  len(steps),
+			StepNumber:  stepNumber,
 		}
 
 		// Switch to spawning on the first ready step
@@ -340,7 +353,7 @@ func runSpawn(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send work assignment mail to polecat inbox (before starting session)
-	workMsg := buildWorkAssignmentMail(issue, spawnMessage, polecatAddress)
+	workMsg := buildWorkAssignmentMail(issue, spawnMessage, polecatAddress, moleculeCtx)
 
 	fmt.Printf("Sending work assignment to %s inbox...\n", polecatAddress)
 	if err := router.Send(workMsg); err != nil {
@@ -579,14 +592,27 @@ func buildSpawnContext(issue *BeadsIssue, message string) string {
 	return sb.String()
 }
 
+// MoleculeContext contains information about a molecule workflow assignment.
+type MoleculeContext struct {
+	MoleculeID  string // The molecule template ID
+	RootIssueID string // The parent issue (molecule root)
+	TotalSteps  int    // Total number of steps in the molecule
+	StepNumber  int    // Which step this is (1-indexed)
+}
+
 // buildWorkAssignmentMail creates a work assignment mail message for a polecat.
 // This replaces tmux-based context injection with persistent mailbox delivery.
-func buildWorkAssignmentMail(issue *BeadsIssue, message, polecatAddress string) *mail.Message {
+// If moleculeCtx is non-nil, includes molecule workflow instructions.
+func buildWorkAssignmentMail(issue *BeadsIssue, message, polecatAddress string, moleculeCtx *MoleculeContext) *mail.Message {
 	var subject string
 	var body strings.Builder
 
 	if issue != nil {
-		subject = fmt.Sprintf("📋 Work Assignment: %s", issue.Title)
+		if moleculeCtx != nil {
+			subject = fmt.Sprintf("🧬 Molecule Step %d/%d: %s", moleculeCtx.StepNumber, moleculeCtx.TotalSteps, issue.Title)
+		} else {
+			subject = fmt.Sprintf("📋 Work Assignment: %s", issue.Title)
+		}
 
 		body.WriteString(fmt.Sprintf("Issue: %s\n", issue.ID))
 		body.WriteString(fmt.Sprintf("Title: %s\n", issue.Title))
@@ -605,14 +631,32 @@ func buildWorkAssignmentMail(issue *BeadsIssue, message, polecatAddress string) 
 		body.WriteString(fmt.Sprintf("Task: %s\n", message))
 	}
 
+	// Add molecule context if present
+	if moleculeCtx != nil {
+		body.WriteString("\n## Molecule Workflow\n")
+		body.WriteString(fmt.Sprintf("You are working on step %d of %d in molecule %s.\n", moleculeCtx.StepNumber, moleculeCtx.TotalSteps, moleculeCtx.MoleculeID))
+		body.WriteString(fmt.Sprintf("Root issue: %s\n\n", moleculeCtx.RootIssueID))
+		body.WriteString("**IMPORTANT**: This is part of a molecule workflow. After completing this step:\n")
+		body.WriteString("1. Run `bd close " + issue.ID + "`\n")
+		body.WriteString("2. Run `bd ready --parent " + moleculeCtx.RootIssueID + "` to find next ready steps\n")
+		body.WriteString("3. If more steps are ready, continue working on them\n")
+		body.WriteString("4. When all steps are done, run `gt done` to signal completion\n\n")
+	}
+
 	body.WriteString("\n## Workflow\n")
 	body.WriteString("1. Run `gt prime` to load polecat context\n")
 	body.WriteString("2. Run `bd sync --from-main` to get fresh beads\n")
 	body.WriteString("3. Work on your task, commit changes regularly\n")
 	body.WriteString("4. Run `bd close <issue-id>` when done\n")
-	body.WriteString("5. Run `bd sync` to push beads changes\n")
-	body.WriteString("6. Push code: `git push origin HEAD`\n")
-	body.WriteString("7. Run `gt done` to signal completion\n")
+	if moleculeCtx != nil {
+		body.WriteString("5. Check `bd ready --parent " + moleculeCtx.RootIssueID + "` for more steps\n")
+		body.WriteString("6. Repeat steps 3-5 for each ready step\n")
+		body.WriteString("7. When all steps done: run `bd sync`, push code, run `gt done`\n")
+	} else {
+		body.WriteString("5. Run `bd sync` to push beads changes\n")
+		body.WriteString("6. Push code: `git push origin HEAD`\n")
+		body.WriteString("7. Run `gt done` to signal completion\n")
+	}
 	body.WriteString("\n## Handoff Protocol\n")
 	body.WriteString("Before signaling done, ensure:\n")
 	body.WriteString("- Git status is clean (no uncommitted changes)\n")

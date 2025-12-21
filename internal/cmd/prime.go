@@ -82,6 +82,9 @@ func runPrime(cmd *cobra.Command, args []string) error {
 	// Output handoff content if present
 	outputHandoffContent(ctx)
 
+	// Output molecule context if working on a molecule step
+	outputMoleculeContext(ctx)
+
 	// Run bd prime to output beads workflow context
 	runBdPrime(cwd)
 
@@ -462,5 +465,118 @@ func runMailCheckInject(workDir string) {
 	if output != "" {
 		fmt.Println()
 		fmt.Println(output)
+	}
+}
+
+// outputMoleculeContext checks if the agent is working on a molecule step and shows progress.
+func outputMoleculeContext(ctx RoleContext) {
+	// Only applies to polecats and crew workers
+	if ctx.Role != RolePolecat && ctx.Role != RoleCrew {
+		return
+	}
+
+	// Check for in-progress issues
+	b := beads.New(ctx.WorkDir)
+	issues, err := b.List(beads.ListOptions{
+		Status:   "in_progress",
+		Assignee: ctx.Polecat,
+		Priority: -1,
+	})
+	if err != nil || len(issues) == 0 {
+		return
+	}
+
+	// Check if any in-progress issue is a molecule step
+	for _, issue := range issues {
+		moleculeID := parseMoleculeMetadata(issue.Description)
+		if moleculeID == "" {
+			continue
+		}
+
+		// Get the parent (root) issue ID
+		rootID := issue.Parent
+		if rootID == "" {
+			continue
+		}
+
+		// This is a molecule step - show context
+		fmt.Println()
+		fmt.Printf("%s\n\n", style.Bold.Render("## 🧬 Molecule Workflow"))
+		fmt.Printf("You are working on a molecule step.\n")
+		fmt.Printf("  Current step: %s\n", issue.ID)
+		fmt.Printf("  Molecule: %s\n", moleculeID)
+		fmt.Printf("  Root issue: %s\n\n", rootID)
+
+		// Show molecule progress by finding sibling steps
+		showMoleculeProgress(b, rootID)
+
+		fmt.Println()
+		fmt.Println("**Molecule Work Loop:**")
+		fmt.Println("1. Complete current step, then `bd close " + issue.ID + "`")
+		fmt.Println("2. Check for next steps: `bd ready --parent " + rootID + "`")
+		fmt.Println("3. Work on next ready step(s)")
+		fmt.Println("4. When all steps done, run `gt done`")
+		break // Only show context for first molecule step found
+	}
+}
+
+// parseMoleculeMetadata extracts molecule info from a step's description.
+// Looks for lines like:
+//
+//	instantiated_from: mol-xyz
+func parseMoleculeMetadata(description string) string {
+	lines := strings.Split(description, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "instantiated_from:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "instantiated_from:"))
+		}
+	}
+	return ""
+}
+
+// showMoleculeProgress displays the progress through a molecule's steps.
+func showMoleculeProgress(b *beads.Beads, rootID string) {
+	if rootID == "" {
+		return
+	}
+
+	// Find all children of the root issue
+	children, err := b.List(beads.ListOptions{
+		Parent:   rootID,
+		Status:   "all",
+		Priority: -1,
+	})
+	if err != nil || len(children) == 0 {
+		return
+	}
+
+	total := len(children)
+	done := 0
+	inProgress := 0
+	var readySteps []string
+
+	for _, child := range children {
+		switch child.Status {
+		case "closed":
+			done++
+		case "in_progress":
+			inProgress++
+		case "open":
+			// Check if ready (no open dependencies)
+			if len(child.DependsOn) == 0 {
+				readySteps = append(readySteps, child.ID)
+			}
+		}
+	}
+
+	fmt.Printf("Progress: %d/%d steps complete", done, total)
+	if inProgress > 0 {
+		fmt.Printf(" (%d in progress)", inProgress)
+	}
+	fmt.Println()
+
+	if len(readySteps) > 0 {
+		fmt.Printf("Ready steps: %s\n", strings.Join(readySteps, ", "))
 	}
 }

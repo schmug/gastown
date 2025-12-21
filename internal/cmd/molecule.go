@@ -113,6 +113,24 @@ Lists each instantiation with its status and progress.`,
 	RunE: runMoleculeInstances,
 }
 
+var moleculeProgressCmd = &cobra.Command{
+	Use:   "progress <root-issue-id>",
+	Short: "Show progress through a molecule's steps",
+	Long: `Show the execution progress of an instantiated molecule.
+
+Given a root issue (the parent of molecule steps), displays:
+- Total steps and completion status
+- Which steps are done, in-progress, ready, or blocked
+- Overall progress percentage
+
+This is useful for the Witness to monitor molecule execution.
+
+Example:
+  gt molecule progress gt-abc`,
+	Args: cobra.ExactArgs(1),
+	RunE: runMoleculeProgress,
+}
+
 func init() {
 	// List flags
 	moleculeListCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
@@ -133,6 +151,9 @@ func init() {
 	// Instances flags
 	moleculeInstancesCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
 
+	// Progress flags
+	moleculeProgressCmd.Flags().BoolVar(&moleculeJSON, "json", false, "Output as JSON")
+
 	// Add subcommands
 	moleculeCmd.AddCommand(moleculeListCmd)
 	moleculeCmd.AddCommand(moleculeShowCmd)
@@ -140,6 +161,7 @@ func init() {
 	moleculeCmd.AddCommand(moleculeInstantiateCmd)
 	moleculeCmd.AddCommand(moleculeInstancesCmd)
 	moleculeCmd.AddCommand(moleculeExportCmd)
+	moleculeCmd.AddCommand(moleculeProgressCmd)
 
 	rootCmd.AddCommand(moleculeCmd)
 }
@@ -646,4 +668,153 @@ func findMoleculeInstances(b *beads.Beads, molID string) ([]*beads.Issue, error)
 	}
 
 	return parents, nil
+}
+
+// MoleculeProgressInfo contains progress information for a molecule instance.
+type MoleculeProgressInfo struct {
+	RootID       string   `json:"root_id"`
+	RootTitle    string   `json:"root_title"`
+	MoleculeID   string   `json:"molecule_id,omitempty"`
+	TotalSteps   int      `json:"total_steps"`
+	DoneSteps    int      `json:"done_steps"`
+	InProgress   int      `json:"in_progress_steps"`
+	ReadySteps   []string `json:"ready_steps"`
+	BlockedSteps []string `json:"blocked_steps"`
+	Percent      int      `json:"percent_complete"`
+	Complete     bool     `json:"complete"`
+}
+
+func runMoleculeProgress(cmd *cobra.Command, args []string) error {
+	rootID := args[0]
+
+	workDir, err := findLocalBeadsDir()
+	if err != nil {
+		return fmt.Errorf("not in a beads workspace: %w", err)
+	}
+
+	b := beads.New(workDir)
+
+	// Get the root issue
+	root, err := b.Show(rootID)
+	if err != nil {
+		return fmt.Errorf("getting root issue: %w", err)
+	}
+
+	// Find all children of the root issue
+	children, err := b.List(beads.ListOptions{
+		Parent:   rootID,
+		Status:   "all",
+		Priority: -1,
+	})
+	if err != nil {
+		return fmt.Errorf("listing children: %w", err)
+	}
+
+	if len(children) == 0 {
+		return fmt.Errorf("no steps found for %s (not a molecule root?)", rootID)
+	}
+
+	// Build progress info
+	progress := MoleculeProgressInfo{
+		RootID:    rootID,
+		RootTitle: root.Title,
+	}
+
+	// Try to find molecule ID from first child's description
+	for _, child := range children {
+		if molID := extractMoleculeID(child.Description); molID != "" {
+			progress.MoleculeID = molID
+			break
+		}
+	}
+
+	// Build set of closed issue IDs for dependency checking
+	closedIDs := make(map[string]bool)
+	for _, child := range children {
+		if child.Status == "closed" {
+			closedIDs[child.ID] = true
+		}
+	}
+
+	// Categorize steps
+	for _, child := range children {
+		progress.TotalSteps++
+
+		switch child.Status {
+		case "closed":
+			progress.DoneSteps++
+		case "in_progress":
+			progress.InProgress++
+		case "open":
+			// Check if all dependencies are closed
+			allDepsClosed := true
+			for _, depID := range child.DependsOn {
+				if !closedIDs[depID] {
+					allDepsClosed = false
+					break
+				}
+			}
+
+			if len(child.DependsOn) == 0 || allDepsClosed {
+				progress.ReadySteps = append(progress.ReadySteps, child.ID)
+			} else {
+				progress.BlockedSteps = append(progress.BlockedSteps, child.ID)
+			}
+		}
+	}
+
+	// Calculate completion percentage
+	if progress.TotalSteps > 0 {
+		progress.Percent = (progress.DoneSteps * 100) / progress.TotalSteps
+	}
+	progress.Complete = progress.DoneSteps == progress.TotalSteps
+
+	// JSON output
+	if moleculeJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(progress)
+	}
+
+	// Human-readable output
+	fmt.Printf("\n%s %s\n\n", style.Bold.Render("🧬 Molecule Progress:"), root.Title)
+	fmt.Printf("  Root: %s\n", rootID)
+	if progress.MoleculeID != "" {
+		fmt.Printf("  Molecule: %s\n", progress.MoleculeID)
+	}
+	fmt.Println()
+
+	// Progress bar
+	barWidth := 20
+	filled := (progress.Percent * barWidth) / 100
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	fmt.Printf("  [%s] %d%% (%d/%d)\n\n", bar, progress.Percent, progress.DoneSteps, progress.TotalSteps)
+
+	// Step status
+	fmt.Printf("  Done:        %d\n", progress.DoneSteps)
+	fmt.Printf("  In Progress: %d\n", progress.InProgress)
+	fmt.Printf("  Ready:       %d", len(progress.ReadySteps))
+	if len(progress.ReadySteps) > 0 {
+		fmt.Printf(" (%s)", strings.Join(progress.ReadySteps, ", "))
+	}
+	fmt.Println()
+	fmt.Printf("  Blocked:     %d\n", len(progress.BlockedSteps))
+
+	if progress.Complete {
+		fmt.Printf("\n  %s\n", style.Bold.Render("✓ Molecule complete!"))
+	}
+
+	return nil
+}
+
+// extractMoleculeID extracts the molecule ID from an issue's description.
+func extractMoleculeID(description string) string {
+	lines := strings.Split(description, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "instantiated_from:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "instantiated_from:"))
+		}
+	}
+	return ""
 }
