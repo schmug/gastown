@@ -567,7 +567,7 @@ func runSlingFormula(args []string) error {
 
 	// Step 2: Create wisp instance (ephemeral)
 	fmt.Printf("  Creating wisp...\n")
-	wispArgs := []string{"wisp", formulaName}
+	wispArgs := []string{"mol", "wisp", formulaName}
 	for _, v := range slingVars {
 		wispArgs = append(wispArgs, "--var", v)
 	}

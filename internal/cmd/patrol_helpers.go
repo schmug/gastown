@@ -117,7 +117,7 @@ func autoSpawnPatrol(cfg PatrolConfig) (string, error) {
 	}
 
 	// Create the patrol wisp
-	cmdSpawn := exec.Command("bd", "--no-daemon", "wisp", "create", protoID, "--actor", cfg.RoleName)
+	cmdSpawn := exec.Command("bd", "--no-daemon", "mol", "wisp", "create", protoID, "--actor", cfg.RoleName)
 	cmdSpawn.Dir = cfg.BeadsDir
 	var stdoutSpawn, stderrSpawn bytes.Buffer
 	cmdSpawn.Stdout = &stdoutSpawn
