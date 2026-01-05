@@ -774,20 +774,11 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 	if hasSession {
 		// Session exists - check if Claude is still running
 		if !t.IsClaudeRunning(sessionID) {
-			// Claude has exited, restart it
+			// Claude has exited, restart it with "gt prime" as initial prompt
 			fmt.Printf("Session exists, restarting Claude...\n")
-			claudeCmd := config.BuildCrewStartupCommand(rigName, name, r.Path, "")
+			claudeCmd := config.BuildCrewStartupCommand(rigName, name, r.Path, "gt prime")
 			if err := t.SendKeys(sessionID, claudeCmd); err != nil {
 				return fmt.Errorf("restarting claude: %w", err)
-			}
-			// Wait for Claude to start, then prime
-			shells := constants.SupportedShells
-			if err := t.WaitForCommand(sessionID, shells, constants.ClaudeStartTimeout); err != nil {
-				style.PrintWarning("Timeout waiting for Claude to start: %v", err)
-			}
-			time.Sleep(constants.ShutdownNotifyDelay)
-			if err := t.NudgeSession(sessionID, "gt prime"); err != nil {
-				style.PrintWarning("Could not send prime command: %v", err)
 			}
 		} else {
 			fmt.Printf("%s Session already running: %s\n", style.Dim.Render("○"), sessionID)
@@ -818,31 +809,10 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		}
 
 		// Start claude with skip permissions and proper env vars for seance
-		claudeCmd := config.BuildCrewStartupCommand(rigName, name, r.Path, "")
+		// Pass "gt prime" as initial prompt so context is loaded immediately
+		claudeCmd := config.BuildCrewStartupCommand(rigName, name, r.Path, "gt prime")
 		if err := t.SendKeys(sessionID, claudeCmd); err != nil {
 			return fmt.Errorf("starting claude: %w", err)
-		}
-
-		// Wait for Claude to start
-		shells := constants.SupportedShells
-		if err := t.WaitForCommand(sessionID, shells, constants.ClaudeStartTimeout); err != nil {
-			style.PrintWarning("Timeout waiting for Claude to start: %v", err)
-		}
-
-		// Give Claude time to initialize after process starts
-		time.Sleep(constants.ShutdownNotifyDelay)
-
-		// Inject startup nudge for predecessor discovery via /resume
-		address := fmt.Sprintf("%s/crew/%s", rigName, name)
-		_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-			Recipient: address,
-			Sender:    "human",
-			Topic:     "cold-start",
-		}) // Non-fatal: session works without nudge
-
-		// Send gt prime to initialize context
-		if err := t.NudgeSession(sessionID, "gt prime"); err != nil {
-			style.PrintWarning("Could not send prime command: %v", err)
 		}
 
 		fmt.Printf("%s Started crew workspace: %s/%s\n",
@@ -961,30 +931,12 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 	}
 
 	// Start claude with proper env vars for seance
-	claudeCmd := config.BuildCrewStartupCommand(rigName, crewName, r.Path, "")
+	// Pass "gt prime" as initial prompt so context is loaded immediately
+	// (SessionStart hook fires, then Claude processes "gt prime" as first user message)
+	claudeCmd := config.BuildCrewStartupCommand(rigName, crewName, r.Path, "gt prime")
 	if err := t.SendKeys(sessionID, claudeCmd); err != nil {
 		return fmt.Errorf("starting claude: %w", err)
 	}
-
-	// Wait for Claude to start
-	shells := constants.SupportedShells
-	if err := t.WaitForCommand(sessionID, shells, constants.ClaudeStartTimeout); err != nil {
-		// Non-fatal: Claude might still be starting
-	}
-
-	// Give Claude time to initialize
-	time.Sleep(constants.ShutdownNotifyDelay)
-
-	// Inject startup nudge for predecessor discovery via /resume
-	address := fmt.Sprintf("%s/crew/%s", rigName, crewName)
-	_ = session.StartupNudge(t, sessionID, session.StartupNudgeConfig{
-		Recipient: address,
-		Sender:    "human",
-		Topic:     "cold-start",
-	}) // Non-fatal
-
-	// Send gt prime to initialize context (non-fatal: session works without priming)
-	_ = t.NudgeSession(sessionID, "gt prime")
 
 	return nil
 }
