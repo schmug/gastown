@@ -362,6 +362,127 @@ func TestMigrateRigFromBeads_AlreadyExists(t *testing.T) {
 	}
 }
 
+func TestHasServerModeMetadata_NoMetadata(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create empty workspace
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "rigs.json"), []byte(`{"rigs":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rigs := HasServerModeMetadata(townRoot)
+	if len(rigs) != 0 {
+		t.Errorf("expected no server-mode rigs, got %v", rigs)
+	}
+}
+
+func TestHasServerModeMetadata_WithServerMode(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Create town beads with server mode
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"hq"}`
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create rig with server mode
+	rigBeadsDir := filepath.Join(townRoot, "myrig", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	rigMetadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"myrig"}`
+	if err := os.WriteFile(filepath.Join(rigBeadsDir, "metadata.json"), []byte(rigMetadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "rigs.json"),
+		[]byte(`{"rigs":{"myrig":{}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rigs := HasServerModeMetadata(townRoot)
+	if len(rigs) != 2 {
+		t.Errorf("expected 2 server-mode rigs, got %d: %v", len(rigs), rigs)
+	}
+}
+
+func TestHasServerModeMetadata_MixedModes(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// Town beads with server mode
+	beadsDir := filepath.Join(townRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"),
+		[]byte(`{"backend":"dolt","dolt_mode":"server","dolt_database":"hq"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rig with sqlite (not server mode)
+	rigBeadsDir := filepath.Join(townRoot, "sqliterig", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigBeadsDir, "metadata.json"),
+		[]byte(`{"backend":"sqlite"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(townRoot, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(townRoot, "mayor", "rigs.json"),
+		[]byte(`{"rigs":{"sqliterig":{}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rigs := HasServerModeMetadata(townRoot)
+	if len(rigs) != 1 {
+		t.Errorf("expected 1 server-mode rig (hq only), got %d: %v", len(rigs), rigs)
+	}
+	if len(rigs) > 0 && rigs[0] != "hq" {
+		t.Errorf("expected hq, got %s", rigs[0])
+	}
+}
+
+func TestCheckServerReachable_NoServer(t *testing.T) {
+	townRoot := t.TempDir()
+
+	// CheckServerReachable should fail when no server is listening
+	// Using default port 3307 - if a real server is running, skip
+	err := CheckServerReachable(townRoot)
+	if err == nil {
+		t.Skip("A server is actually running on port 3307, cannot test unreachable case")
+	}
+	if err != nil && !contains(err.Error(), "not reachable") {
+		t.Errorf("expected 'not reachable' in error, got: %v", err)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchSubstr(s, substr)
+}
+
+func searchSubstr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func TestFindMigratableDatabases_SkipsAlreadyMigrated(t *testing.T) {
 	townRoot := t.TempDir()
 

@@ -3,10 +3,12 @@ package doctor
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // MigrationState represents the migration classification for a rig.
@@ -687,4 +689,108 @@ func formatRigFinding(rig RigMigration) string {
 // NewUnmigratedRigCheck is kept for backward compatibility. It delegates to RigBackendStatusCheck.
 func NewUnmigratedRigCheck() *RigBackendStatusCheck {
 	return NewRigBackendStatusCheck()
+}
+
+// DoltServerReachableCheck detects the split-brain risk: metadata.json says
+// dolt_mode=server but the Dolt server is not actually accepting connections.
+// In this state, bd commands may silently create isolated local databases
+// instead of connecting to the centralized server.
+type DoltServerReachableCheck struct {
+	BaseCheck
+}
+
+// NewDoltServerReachableCheck creates a check for split-brain risk detection.
+func NewDoltServerReachableCheck() *DoltServerReachableCheck {
+	return &DoltServerReachableCheck{
+		BaseCheck: BaseCheck{
+			CheckName:        "dolt-server-reachable",
+			CheckDescription: "Check that Dolt server is reachable when server mode is configured",
+			CheckCategory:    CategoryInfrastructure,
+		},
+	}
+}
+
+// Run checks if any rig has server-mode metadata but the server is unreachable.
+func (c *DoltServerReachableCheck) Run(ctx *CheckContext) *CheckResult {
+	// Find rigs configured for server mode
+	serverRigs := c.findServerModeRigs(ctx.TownRoot)
+	if len(serverRigs) == 0 {
+		return &CheckResult{
+			Name:     c.Name(),
+			Status:   StatusOK,
+			Message:  "No rigs configured for Dolt server mode",
+			Category: c.CheckCategory,
+		}
+	}
+
+	// Server mode is configured — check if the server is actually reachable
+	port := 3307 // default Dolt server port
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		return &CheckResult{
+			Name:   c.Name(),
+			Status: StatusError,
+			Message: fmt.Sprintf("SPLIT-BRAIN RISK: %d rig(s) configured for Dolt server mode but server unreachable at %s",
+				len(serverRigs), addr),
+			Details: []string{
+				fmt.Sprintf("Rigs expecting server: %s", strings.Join(serverRigs, ", ")),
+				"bd commands will fail or create isolated local databases",
+				"This is the split-brain scenario — data written now may be invisible to the server later",
+			},
+			FixHint:  "Run 'gt dolt start' to start the Dolt server",
+			Category: c.CheckCategory,
+		}
+	}
+	conn.Close()
+
+	return &CheckResult{
+		Name:     c.Name(),
+		Status:   StatusOK,
+		Message:  fmt.Sprintf("Dolt server reachable (%d rig(s) in server mode)", len(serverRigs)),
+		Category: c.CheckCategory,
+	}
+}
+
+// findServerModeRigs returns rig names whose metadata.json has dolt_mode=server.
+func (c *DoltServerReachableCheck) findServerModeRigs(townRoot string) []string {
+	var serverRigs []string
+
+	// Check town-level beads (hq)
+	townBeadsDir := filepath.Join(townRoot, ".beads")
+	if c.hasServerModeMetadata(townBeadsDir) {
+		serverRigs = append(serverRigs, "hq")
+	}
+
+	// Check rig-level beads
+	rigsPath := filepath.Join(townRoot, "mayor", "rigs.json")
+	rigs := loadRigNames(rigsPath)
+	for rigName := range rigs {
+		// Check mayor/rig/.beads first (canonical), then rig/.beads
+		beadsDir := filepath.Join(townRoot, rigName, "mayor", "rig", ".beads")
+		if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+			beadsDir = filepath.Join(townRoot, rigName, ".beads")
+		}
+		if c.hasServerModeMetadata(beadsDir) {
+			serverRigs = append(serverRigs, rigName)
+		}
+	}
+
+	return serverRigs
+}
+
+// hasServerModeMetadata reads metadata.json and checks if dolt_mode is "server".
+func (c *DoltServerReachableCheck) hasServerModeMetadata(beadsDir string) bool {
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return false
+	}
+	var metadata struct {
+		DoltMode string `json:"dolt_mode"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return false
+	}
+	return metadata.DoltMode == "server"
 }

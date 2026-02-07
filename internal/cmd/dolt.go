@@ -426,7 +426,21 @@ func runDoltMigrate(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n%s Migration complete.\n", style.Bold.Render("✓"))
-	fmt.Printf("\nStart server with: %s\n", style.Dim.Render("gt dolt start"))
+
+	// Auto-start the Dolt server to prevent split-brain risk.
+	// If bd commands are run before the server starts, they may silently create
+	// isolated local databases instead of connecting to the centralized server.
+	fmt.Printf("\nStarting Dolt server to prevent split-brain risk...\n")
+	if err := doltserver.Start(townRoot); err != nil {
+		fmt.Printf("\n%s Could not auto-start Dolt server: %v\n", style.Bold.Render("⚠"), err)
+		fmt.Printf("\n%s WARNING: Do NOT run bd commands until the server is started!\n", style.Bold.Render("⚠"))
+		fmt.Printf("  Running bd before 'gt dolt start' risks split-brain: bd may create an\n")
+		fmt.Printf("  isolated local database instead of connecting to the centralized server.\n")
+		fmt.Printf("\n  Start manually with: %s\n", style.Dim.Render("gt dolt start"))
+	} else {
+		state, _ := doltserver.LoadState(townRoot)
+		fmt.Printf("%s Dolt server started (PID %d)\n", style.Bold.Render("✓"), state.PID)
+	}
 
 	return nil
 }

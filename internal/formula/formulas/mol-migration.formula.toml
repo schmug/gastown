@@ -245,6 +245,8 @@ gt dolt migrate
 ```
 
 This moves `.beads/dolt/` directories into the centralized `.dolt-data/` location.
+**NOTE:** As of v0.6.0, `gt dolt migrate` auto-starts the Dolt server after
+migration to prevent split-brain risk.
 
 **3. Configure the Dolt daemon:**
 
@@ -257,13 +259,27 @@ cat {{town_root}}/mayor/daemon.json
 # Add or update the dolt_server configuration
 ```
 
-**4. Start the Dolt server:**
+**4. Verify the Dolt server is running:**
+
+⚠️ CRITICAL: The Dolt server MUST be running before ANY `bd` commands.
+If `bd` is run before the server starts, it may silently create an isolated
+local database — causing split-brain where data is invisible to the server.
+
+```bash
+gt dolt status
+```
+
+If the server is not running (e.g., auto-start failed):
 ```bash
 gt dolt start
 ```
 
-**5. Verify each rig:**
+**5. Verify each rig (ONLY after server is confirmed running):**
 ```bash
+# First confirm server is accepting connections
+gt dolt status
+
+# Only then run bd commands
 for dir in {{town_root}}/*/; do
   rig_name=$(basename "$dir")
   if [ -d "$dir/.beads" ]; then
@@ -273,7 +289,7 @@ for dir in {{town_root}}/*/; do
 done
 ```
 
-**Exit criteria:** All rigs migrated, Dolt data consolidated, daemon configured, server started."""
+**Exit criteria:** All rigs migrated, Dolt data consolidated, daemon configured, server running and verified."""
 
 [[steps]]
 id = "verify"
@@ -282,19 +298,27 @@ needs = ["migrate-rigs"]
 description = """
 Comprehensive verification that the migration succeeded.
 
-**1. Run gt doctor:**
-```bash
-gt doctor
-```
-
-All checks should pass. Any beads-related warnings should be investigated.
-
-**2. Verify Dolt server is running:**
+**1. Verify Dolt server is running FIRST (prevents split-brain):**
 ```bash
 gt dolt status
 ```
 
-**3. Test beads operations on each rig:**
+⚠️ If the server is NOT running, start it BEFORE running any bd commands:
+```bash
+gt dolt start
+```
+
+**2. Run gt doctor (includes split-brain detection):**
+```bash
+gt doctor
+```
+
+All checks should pass. In particular, verify:
+- `dolt-server-reachable` check passes (no split-brain risk)
+- `dolt-metadata` check passes (all metadata configured)
+- `rig-backend-status` check passes (all rigs fully migrated)
+
+**3. Test beads operations on each rig (ONLY after server confirmed running):**
 ```bash
 for dir in {{town_root}}/*/; do
   rig_name=$(basename "$dir")
@@ -311,7 +335,7 @@ done
 find {{town_root}} -name "beads.db" -path "*/.beads/*" 2>/dev/null
 ```
 
-**Exit criteria:** gt doctor passes, Dolt server running, all rigs accessible via bd commands."""
+**Exit criteria:** Dolt server running, gt doctor passes (including dolt-server-reachable), all rigs accessible via bd commands."""
 
 [vars]
 [vars.town_root]

@@ -721,3 +721,144 @@ func searchSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+// Tests for DoltServerReachableCheck
+
+func TestDoltServerReachableCheck_NoServerModeRigs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create beads directory WITHOUT server mode metadata
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Metadata says sqlite, not server
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"),
+		[]byte(`{"backend":"sqlite"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte(`{"rigs":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := &CheckContext{TownRoot: tmpDir}
+	check := NewDoltServerReachableCheck()
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("Expected StatusOK when no server mode rigs, got %v: %s", result.Status, result.Message)
+	}
+}
+
+func TestDoltServerReachableCheck_ServerModeButUnreachable(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create beads directory WITH server mode metadata
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"hq"}`
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte(`{"rigs":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := &CheckContext{TownRoot: tmpDir}
+	check := NewDoltServerReachableCheck()
+	result := check.Run(ctx)
+
+	// Server isn't running in test, so should detect split-brain risk
+	// Note: this test may pass as OK if a real Dolt server happens to be
+	// running on port 3307 during the test. That's acceptable.
+	if result.Status == StatusOK {
+		t.Skip("Dolt server is actually running on port 3307, cannot test unreachable case")
+	}
+	if result.Status != StatusError {
+		t.Errorf("Expected StatusError for server-mode-but-unreachable, got %v: %s", result.Status, result.Message)
+	}
+	if !contains(result.Message, "SPLIT-BRAIN") {
+		t.Errorf("Expected SPLIT-BRAIN in message, got: %s", result.Message)
+	}
+}
+
+func TestDoltServerReachableCheck_MultipleRigsServerMode(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create town-level beads with server mode
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"hq"}`
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a rig with server mode
+	rigBeadsDir := filepath.Join(tmpDir, "myrig", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	rigMetadata := `{"backend":"dolt","dolt_mode":"server","dolt_database":"myrig"}`
+	if err := os.WriteFile(filepath.Join(rigBeadsDir, "metadata.json"), []byte(rigMetadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"),
+		[]byte(`{"rigs":{"myrig":{}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := &CheckContext{TownRoot: tmpDir}
+	check := NewDoltServerReachableCheck()
+	result := check.Run(ctx)
+
+	if result.Status == StatusOK {
+		t.Skip("Dolt server is actually running on port 3307, cannot test unreachable case")
+	}
+	if result.Status != StatusError {
+		t.Errorf("Expected StatusError, got %v: %s", result.Status, result.Message)
+	}
+	// Should mention both rigs
+	if !contains(result.Details[0], "hq") || !contains(result.Details[0], "myrig") {
+		t.Errorf("Expected details to mention both hq and myrig, got: %s", result.Details[0])
+	}
+}
+
+func TestDoltServerReachableCheck_NoMetadataNoRigs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Empty workspace — no beads, no rigs
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte(`{"rigs":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := &CheckContext{TownRoot: tmpDir}
+	check := NewDoltServerReachableCheck()
+	result := check.Run(ctx)
+
+	if result.Status != StatusOK {
+		t.Errorf("Expected StatusOK for empty workspace, got %v: %s", result.Status, result.Message)
+	}
+}
