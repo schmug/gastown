@@ -35,6 +35,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -1031,6 +1032,24 @@ func doltSQL(townRoot, rigDB, query string) error {
 	return nil
 }
 
+// validBranchNameRe matches only safe branch name characters: alphanumeric, hyphen,
+// underscore, dot, and forward slash. This prevents SQL injection via branch names
+// interpolated into Dolt stored procedure calls.
+var validBranchNameRe = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
+
+// validateBranchName returns an error if branchName contains characters that could
+// break out of SQL string literals. Defense-in-depth: PolecatBranchName generates
+// safe names, but callers accept arbitrary strings.
+func validateBranchName(branchName string) error {
+	if branchName == "" {
+		return fmt.Errorf("branch name must not be empty")
+	}
+	if !validBranchNameRe.MatchString(branchName) {
+		return fmt.Errorf("branch name %q contains invalid characters", branchName)
+	}
+	return nil
+}
+
 // PolecatBranchName returns the Dolt branch name for a polecat.
 // Format: polecat-<name>-<unix-timestamp>
 func PolecatBranchName(polecatName string) string {
@@ -1040,6 +1059,9 @@ func PolecatBranchName(polecatName string) string {
 // CreatePolecatBranch creates a Dolt branch for a polecat's isolated writes.
 // Each polecat gets its own branch to eliminate optimistic lock contention.
 func CreatePolecatBranch(townRoot, rigDB, branchName string) error {
+	if err := validateBranchName(branchName); err != nil {
+		return fmt.Errorf("creating Dolt branch in %s: %w", rigDB, err)
+	}
 	query := fmt.Sprintf("CALL DOLT_BRANCH('%s')", branchName)
 	if err := doltSQL(townRoot, rigDB, query); err != nil {
 		return fmt.Errorf("creating Dolt branch %s in %s: %w", branchName, rigDB, err)
@@ -1050,6 +1072,9 @@ func CreatePolecatBranch(townRoot, rigDB, branchName string) error {
 // MergePolecatBranch merges a polecat's Dolt branch into main and deletes it.
 // Called at gt done time to make the polecat's beads changes visible.
 func MergePolecatBranch(townRoot, rigDB, branchName string) error {
+	if err := validateBranchName(branchName); err != nil {
+		return fmt.Errorf("merging Dolt branch in %s: %w", rigDB, err)
+	}
 	// Checkout main, merge, delete branch — each as separate commands
 	// to avoid multi-statement parsing issues with dolt sql CLI.
 	if err := doltSQL(townRoot, rigDB, "CALL DOLT_CHECKOUT('main')"); err != nil {
@@ -1068,6 +1093,10 @@ func MergePolecatBranch(townRoot, rigDB, branchName string) error {
 // DeletePolecatBranch deletes a polecat's Dolt branch (cleanup/nuke).
 // Best-effort: logs warning if branch doesn't exist or deletion fails.
 func DeletePolecatBranch(townRoot, rigDB, branchName string) {
+	if err := validateBranchName(branchName); err != nil {
+		fmt.Printf("Warning: invalid Dolt branch name %q: %v\n", branchName, err)
+		return
+	}
 	query := fmt.Sprintf("CALL DOLT_BRANCH('-d', '%s')", branchName)
 	if err := doltSQL(townRoot, rigDB, query); err != nil {
 		// Non-fatal: branch may not exist (already merged/deleted)

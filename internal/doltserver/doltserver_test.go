@@ -1820,3 +1820,44 @@ func TestMoveDir_SourceNotExists(t *testing.T) {
 		t.Fatal("expected error for nonexistent source")
 	}
 }
+
+// =============================================================================
+// Branch name validation tests (SQL injection prevention)
+// =============================================================================
+
+func TestValidateBranchName_ValidNames(t *testing.T) {
+	valid := []string{
+		"main",
+		"polecat-furiosa-1707400000",
+		"feature/my-branch",
+		"release-v1.2.3",
+		"my_branch",
+		"UPPER-case",
+		"a",
+	}
+	for _, name := range valid {
+		if err := validateBranchName(name); err != nil {
+			t.Errorf("validateBranchName(%q) = %v, want nil", name, err)
+		}
+	}
+}
+
+func TestValidateBranchName_InvalidNames(t *testing.T) {
+	invalid := []string{
+		"",                          // empty
+		"branch'name",               // single quote (SQL injection)
+		"branch;DROP TABLE",         // semicolon
+		"branch name",               // space
+		"branch\tname",              // tab
+		"$(command)",                // command substitution
+		"branch`cmd`",               // backtick
+		"branch\"name",              // double quote
+		"branch\\name",              // backslash
+		"'); DROP TABLE issues; --", // classic SQL injection
+	}
+	for _, name := range invalid {
+		if err := validateBranchName(name); err == nil {
+			t.Errorf("validateBranchName(%q) = nil, want error", name)
+		}
+	}
+}
