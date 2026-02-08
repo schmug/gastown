@@ -16,6 +16,12 @@ import (
 
 const doltCmdTimeout = 15 * time.Second
 
+// DefaultDoltHealthCheckInterval is how often the dedicated Dolt health check
+// ticker fires, independent of the general daemon heartbeat (3 min).
+// 30 seconds provides fast crash detection: a Dolt server crash is detected
+// within 30s instead of up to 3 minutes.
+const DefaultDoltHealthCheckInterval = 30 * time.Second
+
 // DoltServerConfig holds configuration for the Dolt SQL server.
 type DoltServerConfig struct {
 	// Enabled controls whether the daemon manages a Dolt server.
@@ -56,6 +62,12 @@ type DoltServerConfig struct {
 	// HealthyResetInterval is how long the server must stay healthy before
 	// the backoff counter resets (default 5min).
 	HealthyResetInterval time.Duration `json:"healthy_reset_interval,omitempty"`
+
+	// HealthCheckInterval is how often to run the Dolt health check,
+	// independent of the general daemon heartbeat. This enables fast
+	// detection of Dolt server crashes without changing the overall
+	// heartbeat frequency. Default 30s.
+	HealthCheckInterval time.Duration `json:"health_check_interval,omitempty"`
 }
 
 // DefaultDoltServerConfig returns sensible defaults for Dolt server config.
@@ -72,6 +84,7 @@ func DefaultDoltServerConfig(townRoot string) *DoltServerConfig {
 		MaxRestartsInWindow:  5,
 		RestartWindow:        10 * time.Minute,
 		HealthyResetInterval: 5 * time.Minute,
+		HealthCheckInterval:  DefaultDoltHealthCheckInterval,
 	}
 }
 
@@ -131,6 +144,15 @@ func (m *DoltServerManager) IsEnabled() bool {
 // IsExternal returns whether the Dolt server is externally managed.
 func (m *DoltServerManager) IsExternal() bool {
 	return m.config != nil && m.config.External
+}
+
+// HealthCheckInterval returns the configured health check interval,
+// falling back to DefaultDoltHealthCheckInterval if not explicitly set.
+func (m *DoltServerManager) HealthCheckInterval() time.Duration {
+	if m.config != nil && m.config.HealthCheckInterval > 0 {
+		return m.config.HealthCheckInterval
+	}
+	return DefaultDoltHealthCheckInterval
 }
 
 // Status returns the current status of the Dolt server.

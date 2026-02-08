@@ -198,6 +198,19 @@ func (d *Daemon) Run() error {
 		}
 	}
 
+	// Start dedicated Dolt health check ticker if Dolt server is configured.
+	// This runs at a much higher frequency (default 30s) than the general
+	// heartbeat (3 min) so Dolt crashes are detected quickly.
+	var doltHealthTicker *time.Ticker
+	var doltHealthChan <-chan time.Time
+	if d.doltServer != nil && d.doltServer.IsEnabled() {
+		interval := d.doltServer.HealthCheckInterval()
+		doltHealthTicker = time.NewTicker(interval)
+		doltHealthChan = doltHealthTicker.C
+		defer doltHealthTicker.Stop()
+		d.logger.Printf("Dolt health check ticker started (interval %v)", interval)
+	}
+
 	// Initial heartbeat
 	d.heartbeat(state)
 
@@ -215,6 +228,13 @@ func (d *Daemon) Run() error {
 			} else {
 				d.logger.Printf("Received signal %v, shutting down", sig)
 				return d.shutdown(state)
+			}
+
+		case <-doltHealthChan:
+			// Dedicated Dolt health check — fast crash detection independent
+			// of the 3-minute general heartbeat.
+			if !d.isShutdownInProgress() {
+				d.ensureDoltServerRunning()
 			}
 
 		case <-timer.C:

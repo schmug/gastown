@@ -161,6 +161,51 @@ func TestDefaultConfig_BackoffFields(t *testing.T) {
 	if cfg.HealthyResetInterval != 5*time.Minute {
 		t.Errorf("expected HealthyResetInterval 5m, got %v", cfg.HealthyResetInterval)
 	}
+	if cfg.HealthCheckInterval != DefaultDoltHealthCheckInterval {
+		t.Errorf("expected HealthCheckInterval %v, got %v", DefaultDoltHealthCheckInterval, cfg.HealthCheckInterval)
+	}
+}
+
+func TestHealthCheckInterval_Default(t *testing.T) {
+	m := &DoltServerManager{
+		config: &DoltServerConfig{
+			Enabled: true,
+		},
+		logger: func(format string, v ...interface{}) {},
+	}
+
+	// When HealthCheckInterval is not set (zero), should return default
+	interval := m.HealthCheckInterval()
+	if interval != DefaultDoltHealthCheckInterval {
+		t.Errorf("expected default %v, got %v", DefaultDoltHealthCheckInterval, interval)
+	}
+}
+
+func TestHealthCheckInterval_Configured(t *testing.T) {
+	m := &DoltServerManager{
+		config: &DoltServerConfig{
+			Enabled:             true,
+			HealthCheckInterval: 15 * time.Second,
+		},
+		logger: func(format string, v ...interface{}) {},
+	}
+
+	interval := m.HealthCheckInterval()
+	if interval != 15*time.Second {
+		t.Errorf("expected 15s, got %v", interval)
+	}
+}
+
+func TestHealthCheckInterval_NilConfig(t *testing.T) {
+	m := &DoltServerManager{
+		config: nil,
+		logger: func(format string, v ...interface{}) {},
+	}
+
+	interval := m.HealthCheckInterval()
+	if interval != DefaultDoltHealthCheckInterval {
+		t.Errorf("expected default %v with nil config, got %v", DefaultDoltHealthCheckInterval, interval)
+	}
 }
 
 func TestRestartingFlag_PreventsConcurrentRestarts(t *testing.T) {
