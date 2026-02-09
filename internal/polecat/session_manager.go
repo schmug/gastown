@@ -228,6 +228,10 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 		command = config.PrependEnv(command, map[string]string{"BD_BRANCH": opts.DoltBranch})
 	}
 
+	// Disable Dolt auto-commit for polecats to prevent manifest contention
+	// under concurrent load (gt-5cc2p). Changes merge at gt done time.
+	command = config.PrependEnv(command, map[string]string{"BD_DOLT_AUTO_COMMIT": "off"})
+
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := m.tmux.NewSessionWithCommand(sessionID, workDir, command); err != nil {
@@ -254,6 +258,10 @@ func (m *SessionManager) Start(polecat string, opts SessionStartOptions) error {
 	if opts.DoltBranch != "" {
 		debugSession("SetEnvironment BD_BRANCH", m.tmux.SetEnvironment(sessionID, "BD_BRANCH", opts.DoltBranch))
 	}
+
+	// Disable Dolt auto-commit in tmux session environment (gt-5cc2p).
+	// This ensures respawned processes also inherit the setting.
+	debugSession("SetEnvironment BD_DOLT_AUTO_COMMIT", m.tmux.SetEnvironment(sessionID, "BD_DOLT_AUTO_COMMIT", "off"))
 
 	// Hook the issue to the polecat if provided via --issue flag
 	if opts.Issue != "" {
