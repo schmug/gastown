@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -318,6 +319,7 @@ func (c *Curator) writeFeedEvent(event *events.Event) {
 
 	data, err := json.Marshal(feedEvent)
 	if err != nil {
+		log.Printf("warning: marshaling feed event: %v", err)
 		return
 	}
 	data = append(data, '\n')
@@ -327,17 +329,19 @@ func (c *Curator) writeFeedEvent(event *events.Event) {
 	// Acquire cross-process file lock to prevent interleaved writes
 	fl := flock.New(feedPath + ".lock")
 	if err := fl.Lock(); err != nil {
+		log.Printf("warning: acquiring feed file lock: %v", err)
 		return
 	}
 	defer fl.Unlock() //nolint:errcheck // best-effort unlock
 
 	f, err := os.OpenFile(feedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // G302: feed file is non-sensitive operational data
 	if err != nil {
+		log.Printf("warning: opening feed file: %v", err)
 		return
 	}
 	defer f.Close()
 
-	_, _ = f.Write(data)
+	_, _ = f.Write(data) //nolint:errcheck // best-effort append under flock
 }
 
 // generateSummary creates a human-readable summary of an event.
