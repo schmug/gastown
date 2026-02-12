@@ -113,10 +113,31 @@ type PatrolConfig struct {
 
 // PatrolsConfig holds configuration for all patrols.
 type PatrolsConfig struct {
-	Refinery   *PatrolConfig     `json:"refinery,omitempty"`
-	Witness    *PatrolConfig     `json:"witness,omitempty"`
-	Deacon     *PatrolConfig     `json:"deacon,omitempty"`
-	DoltServer *DoltServerConfig `json:"dolt_server,omitempty"`
+	Refinery    *PatrolConfig      `json:"refinery,omitempty"`
+	Witness     *PatrolConfig      `json:"witness,omitempty"`
+	Deacon      *PatrolConfig      `json:"deacon,omitempty"`
+	DoltServer  *DoltServerConfig  `json:"dolt_server,omitempty"`
+	DoltRemotes *DoltRemotesConfig `json:"dolt_remotes,omitempty"`
+}
+
+// DoltRemotesConfig holds configuration for the dolt_remotes patrol.
+// This patrol periodically pushes Dolt databases to their configured remotes.
+type DoltRemotesConfig struct {
+	// Enabled controls whether remote push runs.
+	Enabled bool `json:"enabled"`
+
+	// Interval is how often to push (default 15m).
+	Interval time.Duration `json:"interval,omitempty"`
+
+	// Databases lists specific database names to push.
+	// If empty, auto-discovers databases with configured remotes.
+	Databases []string `json:"databases,omitempty"`
+
+	// Remote is the remote name to push to (default "origin").
+	Remote string `json:"remote,omitempty"`
+
+	// Branch is the branch to push (default "main").
+	Branch string `json:"branch,omitempty"`
 }
 
 // DaemonPatrolConfig is the structure of mayor/daemon.json.
@@ -168,6 +189,11 @@ func IsPatrolEnabled(config *DaemonPatrolConfig, patrol string) bool {
 		if config.Patrols.Deacon != nil {
 			return config.Patrols.Deacon.Enabled
 		}
+	case "dolt_remotes":
+		if config.Patrols.DoltRemotes != nil {
+			return config.Patrols.DoltRemotes.Enabled
+		}
+		return false // Default: disabled (opt-in)
 	}
 	return true // Default: enabled
 }
