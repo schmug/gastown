@@ -87,6 +87,21 @@
                     <span class="stat-value">{{.Summary.EscalationCount}}</span>
                     <span class="stat-label">⚠️ Escalations</span>
                 </div>
+                {{if .Tunnel}}
+                <div class="stat tunnel-stat {{if .Tunnel.Running}}tunnel-active{{else}}tunnel-off{{end}}">
+                    <span class="stat-value">🌐</span>
+                    {{if .Tunnel.Running}}
+                    <span class="stat-label">
+                        <a href="https://{{.Tunnel.Hostname}}" target="_blank" class="tunnel-link">{{.Tunnel.Hostname}}</a>
+                        <span class="tunnel-uptime">{{.Tunnel.Uptime}}</span>
+                    </span>
+                    <button class="tunnel-toggle-btn tunnel-stop" onclick="toggleTunnel('stop')">Stop</button>
+                    {{else}}
+                    <span class="stat-label">Tunnel Off</span>
+                    <button class="tunnel-toggle-btn tunnel-start" onclick="toggleTunnel('start')">Start</button>
+                    {{end}}
+                </div>
+                {{end}}
             </div>
             {{if .Summary.HasAlerts}}
             <div class="summary-alerts">

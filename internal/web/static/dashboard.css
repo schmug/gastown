@@ -2704,3 +2704,83 @@
         .sling-dropdown-item + .sling-dropdown-item {
             border-top: 1px solid var(--border);
         }
+
+        /* Tunnel indicator */
+        .tunnel-stat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+        }
+
+        .tunnel-stat.tunnel-active {
+            border-color: var(--green);
+            background: rgba(194, 217, 76, 0.08);
+        }
+
+        .tunnel-stat.tunnel-off {
+            border-color: var(--border);
+            opacity: 0.7;
+        }
+
+        .tunnel-stat .stat-value {
+            font-size: 1rem;
+        }
+
+        .tunnel-link {
+            color: var(--green);
+            text-decoration: none;
+            font-size: 0.75rem;
+        }
+
+        .tunnel-link:hover {
+            text-decoration: underline;
+        }
+
+        .tunnel-uptime {
+            color: var(--text-muted);
+            font-size: 0.65rem;
+            margin-left: 4px;
+        }
+
+        .tunnel-toggle-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .tunnel-toggle-btn:hover:not(:disabled) {
+            background: var(--bg-card-hover);
+            color: var(--text-primary);
+        }
+
+        .tunnel-toggle-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .tunnel-toggle-btn.tunnel-stop {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        .tunnel-toggle-btn.tunnel-stop:hover:not(:disabled) {
+            background: rgba(240, 113, 120, 0.15);
+        }
+
+        .tunnel-toggle-btn.tunnel-start {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        .tunnel-toggle-btn.tunnel-start:hover:not(:disabled) {
+            background: rgba(194, 217, 76, 0.15);
+        }

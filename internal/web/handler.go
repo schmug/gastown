@@ -37,9 +37,10 @@ type ConvoyFetcher interface {
 
 // ConvoyHandler handles HTTP requests for the convoy dashboard.
 type ConvoyHandler struct {
-	fetcher      ConvoyFetcher
-	template     *template.Template
-	fetchTimeout time.Duration
+	fetcher       ConvoyFetcher
+	template      *template.Template
+	fetchTimeout  time.Duration
+	tunnelManager *TunnelManager
 }
 
 // NewConvoyHandler creates a new convoy handler with the given fetcher and fetch timeout.
@@ -216,6 +217,11 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Compute summary from already-fetched data
 	summary := computeSummary(workers, hooks, issues, convoys, escalations, activity)
 
+	var tunnelStatus *TunnelStatus
+	if h.tunnelManager != nil {
+		tunnelStatus = h.tunnelManager.Status()
+	}
+
 	data := ConvoyData{
 		Convoys:     convoys,
 		MergeQueue:  mergeQueue,
@@ -232,6 +238,7 @@ func (h *ConvoyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Issues:      enrichIssuesWithAssignees(issues, hooks),
 		Activity:    activity,
 		Summary:     summary,
+		Tunnel:      tunnelStatus,
 		Expand:      expandPanel,
 	}
 
@@ -327,7 +334,8 @@ func enrichIssuesWithAssignees(issues []IssueRow, hooks []HookRow) []IssueRow {
 
 // NewDashboardMux creates an HTTP handler that serves both the dashboard and API.
 // webCfg may be nil, in which case defaults are used.
-func NewDashboardMux(fetcher ConvoyFetcher, webCfg *config.WebTimeoutsConfig) (http.Handler, error) {
+// tunnelMgr may be nil if tunnel support is not enabled.
+func NewDashboardMux(fetcher ConvoyFetcher, webCfg *config.WebTimeoutsConfig, tunnelMgr ...*TunnelManager) (http.Handler, error) {
 	if webCfg == nil {
 		webCfg = config.DefaultWebTimeoutsConfig()
 	}
@@ -338,9 +346,17 @@ func NewDashboardMux(fetcher ConvoyFetcher, webCfg *config.WebTimeoutsConfig) (h
 		return nil, err
 	}
 
+	// Wire tunnel manager if provided
+	var tm *TunnelManager
+	if len(tunnelMgr) > 0 && tunnelMgr[0] != nil {
+		tm = tunnelMgr[0]
+		convoyHandler.tunnelManager = tm
+	}
+
 	defaultRunTimeout := config.ParseDurationOrDefault(webCfg.DefaultRunTimeout, 30*time.Second)
 	maxRunTimeout := config.ParseDurationOrDefault(webCfg.MaxRunTimeout, 60*time.Second)
 	apiHandler := NewAPIHandler(defaultRunTimeout, maxRunTimeout)
+	apiHandler.tunnelManager = tm
 
 	// Create static file server from embedded files
 	staticFS, err := fs.Sub(staticFiles, "static")

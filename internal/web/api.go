@@ -52,6 +52,8 @@ type APIHandler struct {
 	optionsCache     *OptionsResponse
 	optionsCacheTime time.Time
 	optionsCacheMu   sync.RWMutex
+	// Tunnel manager (may be nil)
+	tunnelManager *TunnelManager
 }
 
 const optionsCacheTTL = 30 * time.Second
@@ -111,6 +113,12 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleReady(w, r)
 	case path == "/events" && r.Method == http.MethodGet:
 		h.handleSSE(w, r)
+	case path == "/tunnel/status" && r.Method == http.MethodGet:
+		h.handleTunnelStatus(w, r)
+	case path == "/tunnel/start" && r.Method == http.MethodPost:
+		h.handleTunnelStart(w, r)
+	case path == "/tunnel/stop" && r.Method == http.MethodPost:
+		h.handleTunnelStop(w, r)
 	default:
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
@@ -1805,6 +1813,44 @@ func (h *APIHandler) handleReady(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleTunnelStatus returns the current tunnel status as JSON.
+func (h *APIHandler) handleTunnelStatus(w http.ResponseWriter, _ *http.Request) {
+	if h.tunnelManager == nil {
+		h.sendError(w, "Tunnel not configured", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(h.tunnelManager.Status())
+}
+
+// handleTunnelStart starts the cloudflare tunnel.
+func (h *APIHandler) handleTunnelStart(w http.ResponseWriter, _ *http.Request) {
+	if h.tunnelManager == nil {
+		h.sendError(w, "Tunnel not configured", http.StatusNotFound)
+		return
+	}
+	if err := h.tunnelManager.Start(); err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(h.tunnelManager.Status())
+}
+
+// handleTunnelStop stops the cloudflare tunnel.
+func (h *APIHandler) handleTunnelStop(w http.ResponseWriter, _ *http.Request) {
+	if h.tunnelManager == nil {
+		h.sendError(w, "Tunnel not configured", http.StatusNotFound)
+		return
+	}
+	if err := h.tunnelManager.Stop(); err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(h.tunnelManager.Status())
 }
 
 // parseCommandArgs splits a command string into args, respecting quotes.

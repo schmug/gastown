@@ -269,8 +269,30 @@ func (h *SetupAPIHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":  true,
 		"message":  fmt.Sprintf("Dashboard launching from %s", path),
-		"redirect": fmt.Sprintf("http://localhost:%d", newPort),
+		"redirect": fmt.Sprintf("%s://%s:%d", reqScheme(r), reqHost(r), newPort),
 	})
+}
+
+// reqScheme returns "https" if the request arrived via TLS or a reverse proxy
+// (e.g. Cloudflare Tunnel), otherwise "http".
+func reqScheme(r *http.Request) string {
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		return "https"
+	}
+	return "http"
+}
+
+// reqHost returns the hostname (without port) from the request.
+func reqHost(r *http.Request) string {
+	host := r.Host
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		host = h
+	}
+	// Strip port if present
+	if idx := strings.LastIndex(host, ":"); idx > 0 {
+		return host[:idx]
+	}
+	return host
 }
 
 func (h *SetupAPIHandler) handleCheckWorkspace(w http.ResponseWriter, r *http.Request) {
