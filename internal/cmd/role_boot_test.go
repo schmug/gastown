@@ -3,6 +3,8 @@ package cmd
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/beads"
 )
 
 func TestParseRoleStringBoot(t *testing.T) {
@@ -79,12 +81,31 @@ func TestActorStringBoot(t *testing.T) {
 }
 
 func TestActorStringConsistentWithBDActorBoot(t *testing.T) {
-	// ActorString() must match what BD_ACTOR is set to in config/env.go.
-	// BD_ACTOR for boot is "deacon-boot".
+	// ActorString() must match what BD_ACTOR is set to in config/env.go:57.
+	// This is a snapshot value — if BD_ACTOR for boot changes in config/env.go,
+	// update it here too.
 	info := RoleInfo{Role: RoleBoot}
 	actorString := info.ActorString()
-	bdActor := "deacon-boot" // from internal/config/env.go:57
+	bdActor := "deacon-boot" // snapshot from internal/config/env.go:57
 	if actorString != bdActor {
 		t.Errorf("ActorString() = %q does not match BD_ACTOR = %q", actorString, bdActor)
+	}
+}
+
+func TestBuildAgentBeadIDBoot(t *testing.T) {
+	// RoleBoot should produce the town-level dog bead ID "hq-dog-boot"
+	// via both the explicit role path and the identity-inference path.
+	want := beads.DogBeadIDTown("boot")
+
+	// Explicit role path
+	got := buildAgentBeadID("deacon-boot", RoleBoot, "/tmp/gt")
+	if got != want {
+		t.Errorf("buildAgentBeadID(RoleBoot) = %q, want %q", got, want)
+	}
+
+	// Identity inference path (RoleUnknown + "deacon-boot" identity)
+	got = buildAgentBeadID("deacon-boot", RoleUnknown, "/tmp/gt")
+	if got != want {
+		t.Errorf("buildAgentBeadID(RoleUnknown, \"deacon-boot\") = %q, want %q", got, want)
 	}
 }
