@@ -349,7 +349,7 @@ func (h *APIHandler) handleMailRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output, err := h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "read", msgID})
+	output, err := h.runGtCommandStdoutOnly(r.Context(), 10*time.Second, []string{"mail", "read", msgID})
 	if err != nil {
 		h.sendError(w, "Failed to read message: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -419,7 +419,7 @@ func (h *APIHandler) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, "--", req.To)
 
-	output, err := h.runGtCommand(r.Context(), 30*time.Second, args)
+	output, err := h.runGtCommandStdoutOnly(r.Context(), 30*time.Second, args)
 	if err != nil {
 		h.sendError(w, "Failed to send message: "+err.Error()+"\n"+output, http.StatusInternalServerError)
 		return
@@ -557,7 +557,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch rigs
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"rig", "list"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"rig", "list"}); err == nil {
 			mu.Lock()
 			resp.Rigs = parseRigListOutput(output)
 			mu.Unlock()
@@ -581,7 +581,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch convoys
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"convoy", "list"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"convoy", "list"}); err == nil {
 			mu.Lock()
 			resp.Convoys = parseConvoyListOutput(output)
 			mu.Unlock()
@@ -593,7 +593,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch hooks
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"hooks", "list"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"hooks", "list"}); err == nil {
 			mu.Lock()
 			resp.Hooks = parseHooksListOutput(output)
 			mu.Unlock()
@@ -605,7 +605,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch mail messages
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"mail", "inbox"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"mail", "inbox"}); err == nil {
 			mu.Lock()
 			resp.Messages = parseMailInboxOutput(output)
 			mu.Unlock()
@@ -617,7 +617,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch crew members
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"crew", "list", "--all"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"crew", "list", "--all"}); err == nil {
 			mu.Lock()
 			resp.Crew = parseCrewListOutput(output)
 			mu.Unlock()
