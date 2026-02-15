@@ -368,16 +368,21 @@ func runConvoyCreate(cmd *cobra.Command, args []string) error {
 	// Generate convoy ID with cv- prefix
 	convoyID := fmt.Sprintf("hq-cv-%s", generateShortID())
 
+	// Use --type=task with gt:convoy label instead of --type=convoy.
+	// bd's no-db mode rejects custom types during validation (bd bug),
+	// but the dashboard fetcher queries by --label=gt:convoy anyway.
+	labels := "gt:convoy"
+	if convoyOwned {
+		labels += ",gt:owned"
+	}
 	createArgs := []string{
 		"create",
-		"--type=convoy",
+		"--type=task",
 		"--id=" + convoyID,
 		"--title=" + name,
 		"--description=" + description,
+		"--labels=" + labels,
 		"--json",
-	}
-	if convoyOwned {
-		createArgs = append(createArgs, "--labels=gt:owned")
 	}
 	if beads.NeedsForceForID(convoyID) {
 		createArgs = append(createArgs, "--force")
