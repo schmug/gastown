@@ -30,6 +30,7 @@ type ConvoyData struct {
 	Issues      []IssueRow
 	Activity    []ActivityRow
 	Summary     *DashboardSummary
+	Tunnel      *TunnelStatus
 	Expand      string // Panel to show fullscreen (from ?expand=name)
 }
 

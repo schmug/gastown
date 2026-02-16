@@ -56,6 +56,8 @@ type APIHandler struct {
 	optionsCacheMu   sync.RWMutex
 	// cmdSem limits concurrent command executions to prevent resource exhaustion.
 	cmdSem chan struct{}
+	// Tunnel manager (may be nil)
+	tunnelManager *TunnelManager
 }
 
 const optionsCacheTTL = 30 * time.Second
@@ -120,6 +122,12 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleReady(w, r)
 	case path == "/events" && r.Method == http.MethodGet:
 		h.handleSSE(w, r)
+	case path == "/tunnel/status" && r.Method == http.MethodGet:
+		h.handleTunnelStatus(w, r)
+	case path == "/tunnel/start" && r.Method == http.MethodPost:
+		h.handleTunnelStart(w, r)
+	case path == "/tunnel/stop" && r.Method == http.MethodPost:
+		h.handleTunnelStop(w, r)
 	default:
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
@@ -244,6 +252,39 @@ func (h *APIHandler) runGtCommand(ctx context.Context, timeout time.Duration, ar
 	return output, nil
 }
 
+// runGtCommandStdoutOnly runs a gt command and returns only stdout, discarding stderr.
+// Use this instead of runGtCommand when the output will be parsed as JSON, since
+// stderr warnings (e.g., "WARNING: This binary was built with 'go build'...") would
+// make the combined output invalid JSON.
+func (h *APIHandler) runGtCommandStdoutOnly(ctx context.Context, timeout time.Duration, args []string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, h.gtPath, args...)
+	if h.workDir != "" {
+		cmd.Dir = h.workDir
+	}
+	cmd.Stdin = nil
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = nil // discard stderr
+
+	err := cmd.Run()
+
+	output := stdout.String()
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return output, fmt.Errorf("command timed out after %v", timeout)
+	}
+
+	if err != nil {
+		return output, fmt.Errorf("command failed: %v", err)
+	}
+
+	return output, nil
+}
+
 // sendError sends a JSON error response.
 func (h *APIHandler) sendError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
@@ -275,10 +316,10 @@ type MailInboxResponse struct {
 
 // handleMailInbox returns the user's inbox.
 func (h *APIHandler) handleMailInbox(w http.ResponseWriter, r *http.Request) {
-	output, err := h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "inbox", "--json"})
+	output, err := h.runGtCommandStdoutOnly(r.Context(), 10*time.Second, []string{"mail", "inbox", "--json"})
 	if err != nil {
 		// Try without --json flag
-		output, err = h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "inbox"})
+		output, err = h.runGtCommandStdoutOnly(r.Context(), 10*time.Second, []string{"mail", "inbox"})
 		if err != nil {
 			h.sendError(w, "Failed to fetch inbox: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -334,7 +375,7 @@ func (h *APIHandler) handleMailRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output, err := h.runGtCommand(r.Context(), 10*time.Second, []string{"mail", "read", msgID})
+	output, err := h.runGtCommandStdoutOnly(r.Context(), 10*time.Second, []string{"mail", "read", msgID})
 	if err != nil {
 		h.sendError(w, "Failed to read message: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -404,7 +445,7 @@ func (h *APIHandler) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, "--", req.To)
 
-	output, err := h.runGtCommand(r.Context(), 30*time.Second, args)
+	output, err := h.runGtCommandStdoutOnly(r.Context(), 30*time.Second, args)
 	if err != nil {
 		h.sendError(w, "Failed to send message: "+err.Error()+"\n"+output, http.StatusInternalServerError)
 		return
@@ -549,7 +590,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch rigs
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"rig", "list"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"rig", "list"}); err == nil {
 			mu.Lock()
 			resp.Rigs = parseRigListOutput(output)
 			mu.Unlock()
@@ -561,7 +602,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch polecats
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"polecat", "list", "--all", "--json"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"polecat", "list", "--all", "--json"}); err == nil {
 			mu.Lock()
 			resp.Polecats = parseJSONPaths(output)
 			mu.Unlock()
@@ -573,7 +614,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch convoys
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"convoy", "list"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"convoy", "list"}); err == nil {
 			mu.Lock()
 			resp.Convoys = parseConvoyListOutput(output)
 			mu.Unlock()
@@ -585,7 +626,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch hooks
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"hooks", "list"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"hooks", "list"}); err == nil {
 			mu.Lock()
 			resp.Hooks = parseHooksListOutput(output)
 			mu.Unlock()
@@ -597,7 +638,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch mail messages
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"mail", "inbox"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"mail", "inbox"}); err == nil {
 			mu.Lock()
 			resp.Messages = parseMailInboxOutput(output)
 			mu.Unlock()
@@ -609,7 +650,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch crew members
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 3*time.Second, []string{"crew", "list", "--all"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 3*time.Second, []string{"crew", "list", "--all"}); err == nil {
 			mu.Lock()
 			resp.Crew = parseCrewListOutput(output)
 			mu.Unlock()
@@ -621,7 +662,7 @@ func (h *APIHandler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	// Fetch agents - shorter timeout, skip if slow
 	go func() {
 		defer wg.Done()
-		if output, err := h.runGtCommand(r.Context(), 5*time.Second, []string{"status", "--json"}); err == nil {
+		if output, err := h.runGtCommandStdoutOnly(r.Context(), 5*time.Second, []string{"status", "--json"}); err == nil {
 			mu.Lock()
 			resp.Agents = parseAgentsFromStatus(output)
 			mu.Unlock()
@@ -1538,7 +1579,7 @@ func (h *APIHandler) handleCrew(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Run gt crew list --all --json to get crew across all rigs
-	output, err := h.runGtCommand(ctx, 10*time.Second, []string{"crew", "list", "--all", "--json"})
+	output, err := h.runGtCommandStdoutOnly(ctx, 10*time.Second, []string{"crew", "list", "--all", "--json"})
 	
 	resp := CrewResponse{
 		Crew:  make([]CrewMember, 0),
@@ -1747,7 +1788,7 @@ func (h *APIHandler) handleReady(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Run gt ready --json to get ready work
-	output, err := h.runGtCommand(ctx, 12*time.Second, []string{"ready", "--json"})
+	output, err := h.runGtCommandStdoutOnly(ctx, 12*time.Second, []string{"ready", "--json"})
 	
 	resp := ReadyResponse{
 		Items:    make([]ReadyItem, 0),
@@ -1815,6 +1856,44 @@ func (h *APIHandler) handleReady(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// handleTunnelStatus returns the current tunnel status as JSON.
+func (h *APIHandler) handleTunnelStatus(w http.ResponseWriter, _ *http.Request) {
+	if h.tunnelManager == nil {
+		h.sendError(w, "Tunnel not configured", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(h.tunnelManager.Status())
+}
+
+// handleTunnelStart starts the cloudflare tunnel.
+func (h *APIHandler) handleTunnelStart(w http.ResponseWriter, _ *http.Request) {
+	if h.tunnelManager == nil {
+		h.sendError(w, "Tunnel not configured", http.StatusNotFound)
+		return
+	}
+	if err := h.tunnelManager.Start(); err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(h.tunnelManager.Status())
+}
+
+// handleTunnelStop stops the cloudflare tunnel.
+func (h *APIHandler) handleTunnelStop(w http.ResponseWriter, _ *http.Request) {
+	if h.tunnelManager == nil {
+		h.sendError(w, "Tunnel not configured", http.StatusNotFound)
+		return
+	}
+	if err := h.tunnelManager.Stop(); err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(h.tunnelManager.Status())
+}
+
 // parseCommandArgs splits a command string into args, respecting quotes.
 func parseCommandArgs(command string) []string {
 	var args []string
@@ -1861,6 +1940,12 @@ func (h *APIHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SSE not supported", http.StatusInternalServerError)
 		return
 	}
+
+	// Disable the server's WriteTimeout for this long-lived SSE connection.
+	// Without this, Go's WriteTimeout (set on the http.Server) acts as a
+	// deadline for the entire response, killing the SSE stream after 60s.
+	rc := http.NewResponseController(w)
+	rc.SetWriteDeadline(time.Time{})
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

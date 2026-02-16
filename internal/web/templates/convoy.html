@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
-    <div class="dashboard" id="dashboard-main" hx-get="/" hx-trigger="sse:dashboard-update, every 30s [!window.pauseRefresh && !window.sseConnected]" hx-swap="morph:outerHTML" hx-ext="morph">
+    <div class="dashboard" id="dashboard-main" hx-get="/" hx-trigger="dashboardUpdate, every 30s [!window.pauseRefresh && !window.sseConnected]" hx-swap="morph:outerHTML" hx-ext="morph">
         <header>
             <pre class="ascii-title">  __  __    __   _____ __  _   _  __  _    ___ __  __  _ _____ ___  __  _      ______ __  _ _____ ___ ___ 
  / _]/  \ /' _| |_   _/__\| | | ||  \| |  / _//__\|  \| |_   _| _ \/__\| |    / _/ __|  \| |_   _| __| _ \
@@ -87,6 +87,21 @@
                     <span class="stat-value">{{.Summary.EscalationCount}}</span>
                     <span class="stat-label">⚠️ Escalations</span>
                 </div>
+                {{if .Tunnel}}
+                <div class="stat tunnel-stat {{if .Tunnel.Running}}tunnel-active{{else}}tunnel-off{{end}}">
+                    <span class="stat-value">🌐</span>
+                    {{if .Tunnel.Running}}
+                    <span class="stat-label">
+                        <a href="https://{{.Tunnel.Hostname}}" target="_blank" class="tunnel-link">{{.Tunnel.Hostname}}</a>
+                        <span class="tunnel-uptime">{{.Tunnel.Uptime}}</span>
+                    </span>
+                    <button class="tunnel-toggle-btn tunnel-stop" onclick="toggleTunnel('stop')">Stop</button>
+                    {{else}}
+                    <span class="stat-label">Tunnel Off</span>
+                    <button class="tunnel-toggle-btn tunnel-start" onclick="toggleTunnel('start')">Start</button>
+                    {{end}}
+                </div>
+                {{end}}
             </div>
             {{if .Summary.HasAlerts}}
             <div class="summary-alerts">
@@ -1037,6 +1052,6 @@
         <div id="output-panel-content" class="output-panel-content"></div>
     </div>
 
-    <script src="/static/dashboard.js?v=3"></script>
+    <script src="/static/dashboard.js?v=4"></script>
 </body>
 </html>

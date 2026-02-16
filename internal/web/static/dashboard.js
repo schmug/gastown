@@ -27,7 +27,7 @@
             // Trigger HTMX to re-fetch the dashboard
             var dashboard = document.getElementById('dashboard-main');
             if (dashboard && typeof htmx !== 'undefined') {
-                htmx.trigger(dashboard, 'sse:dashboard-update');
+                htmx.trigger(dashboard, 'dashboardUpdate');
             }
         });
 
@@ -2881,5 +2881,41 @@
         initTimelineFilters();
     });
 
+    // ============================================
+    // TUNNEL TOGGLE
+    // ============================================
+    window.toggleTunnel = function(action) {
+        var btn = document.querySelector('.tunnel-toggle-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = action === 'start' ? 'Starting...' : 'Stopping...';
+        }
+
+        fetch('/api/tunnel/' + action, { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    showToast('error', 'Tunnel Error', data.error);
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = action === 'start' ? 'Start' : 'Stop';
+                    }
+                    return;
+                }
+                showToast('success', 'Tunnel', action === 'start' ? 'Tunnel started' : 'Tunnel stopped');
+                // Trigger dashboard refresh to update the indicator
+                var dashboard = document.getElementById('dashboard-main');
+                if (dashboard && typeof htmx !== 'undefined') {
+                    htmx.trigger(dashboard, 'dashboardUpdate');
+                }
+            })
+            .catch(function(err) {
+                showToast('error', 'Tunnel Error', err.message || 'Request failed');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = action === 'start' ? 'Start' : 'Stop';
+                }
+            });
+    };
 
 })();
