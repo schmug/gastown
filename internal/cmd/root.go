@@ -65,6 +65,7 @@ var beadsExemptCommands = map[string]bool{
 	"signal":        true, // Hook signal handlers must be fast, handle beads internally
 	"krc":           true, // KRC doesn't require beads
 	"run-migration": true, // Migration orchestrator handles its own beads checks
+	"mcp-server":    true, // MCP server handles beads internally
 }
 
 // Commands exempt from the town root branch warning.
